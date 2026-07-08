@@ -29,6 +29,7 @@ import {
   PageNumber,
 } from "docx";
 import sizeOf from "image-size";
+import sharp from "sharp";
 import fs from "fs/promises";
 import path from "path";
 import {
@@ -84,31 +85,27 @@ function table(headers: string[], rows: (string | null)[][]) {
   });
 }
 
-function imageTypeFromUrl(url: string): "jpg" | "png" | "gif" | "bmp" {
-  const ext = path.extname(url).toLowerCase();
-  if (ext === ".png") return "png";
-  if (ext === ".gif") return "gif";
-  if (ext === ".bmp") return "bmp";
-  return "jpg";
-}
-
 async function photosCell(urls: string[]): Promise<TableCell> {
   const pars: Paragraph[] = [];
   for (const url of urls) {
     try {
       const filePath = path.join(process.cwd(), "public", url.replace(/^\//, ""));
-      const buffer = await fs.readFile(filePath);
-      const { width, height } = sizeOf(buffer);
-      const maxW = 120;
+      const imgBuffer = await fs.readFile(filePath);
+      const { width, height } = sizeOf(imgBuffer);
+      const maxW = 200;
       const scale = Math.min(1, maxW / ((width as number) || 1));
       const w = Math.round(((width as number) || 1) * scale);
       const h = Math.round(((height as number) || 1) * scale);
+      const buffer = await sharp(imgBuffer)
+        .resize(w, h, { withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
       pars.push(
         new Paragraph({
           spacing: { after: 40 },
           children: [
             new ImageRun({
-              type: imageTypeFromUrl(url),
+              type: "jpg",
               data: buffer,
               transformation: { width: w, height: h },
             }),
