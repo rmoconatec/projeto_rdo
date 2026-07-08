@@ -25,6 +25,8 @@ import {
   WidthType,
   BorderStyle,
   AlignmentType,
+  Footer,
+  PageNumber,
 } from "docx";
 import sizeOf from "image-size";
 import fs from "fs/promises";
@@ -326,7 +328,22 @@ export async function GET(
     })
   );
 
-  const doc = new Document({ sections: [{ children }] });
+  const footer = new Footer({
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 120 },
+        children: [
+          new TextRun({ text: "Página ", size: 18, color: "888888" }),
+          new TextRun({ children: [PageNumber.CURRENT], size: 18, color: "888888" }),
+          new TextRun({ text: " de ", size: 18, color: "888888" }),
+          new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 18, color: "888888" }),
+        ],
+      }),
+    ],
+  });
+
+  const doc = new Document({ sections: [{ children, footers: { default: footer } }] });
   const buffer = await Packer.toBuffer(doc);
 
   const raw = obra?.nome || "obra";
