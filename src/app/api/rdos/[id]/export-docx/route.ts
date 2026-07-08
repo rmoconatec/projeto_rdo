@@ -99,8 +99,8 @@ async function photosCell(urls: string[]): Promise<TableCell> {
       const { width, height } = sizeOf(buffer);
       const maxW = 120;
       const scale = Math.min(1, maxW / ((width as number) || 1));
-      const w = Math.round(((width as number) || 1) * scale * 9525);
-      const h = Math.round(((height as number) || 1) * scale * 9525);
+      const w = Math.round(((width as number) || 1) * scale);
+      const h = Math.round(((height as number) || 1) * scale);
       pars.push(
         new Paragraph({
           spacing: { after: 40 },
