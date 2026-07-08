@@ -18,6 +18,7 @@ import {
   Paragraph,
   HeadingLevel,
   TextRun,
+  ImageRun,
   Table,
   TableRow,
   TableCell,
@@ -25,6 +26,9 @@ import {
   BorderStyle,
   AlignmentType,
 } from "docx";
+import sizeOf from "image-size";
+import fs from "fs/promises";
+import path from "path";
 import {
   CLIMA,
   CONDICAO,
@@ -76,6 +80,47 @@ function table(headers: string[], rows: (string | null)[][]) {
       ...rows.map((r) => new TableRow({ children: r.map((c) => cell(c)) })),
     ],
   });
+}
+
+function imageTypeFromUrl(url: string): "jpg" | "png" | "gif" | "bmp" {
+  const ext = path.extname(url).toLowerCase();
+  if (ext === ".png") return "png";
+  if (ext === ".gif") return "gif";
+  if (ext === ".bmp") return "bmp";
+  return "jpg";
+}
+
+async function photosCell(urls: string[]): Promise<TableCell> {
+  const pars: Paragraph[] = [];
+  for (const url of urls) {
+    try {
+      const filePath = path.join(process.cwd(), "public", url);
+      const buffer = await fs.readFile(filePath);
+      const { width, height } = sizeOf(buffer);
+      const maxW = 120;
+      const scale = Math.min(1, maxW / ((width as number) || 1));
+      const w = Math.round(((width as number) || 1) * scale * 9525);
+      const h = Math.round(((height as number) || 1) * scale * 9525);
+      pars.push(
+        new Paragraph({
+          spacing: { after: 40 },
+          children: [
+            new ImageRun({
+              type: imageTypeFromUrl(url),
+              data: buffer,
+              transformation: { width: w, height: h },
+            }),
+          ],
+        })
+      );
+    } catch {
+      // skip
+    }
+  }
+  if (pars.length === 0) {
+    pars.push(new Paragraph({ children: [new TextRun({ text: "—", size: 18 })] }));
+  }
+  return new TableCell({ borders, margins: { top: 40, bottom: 40, left: 80, right: 80 }, children: pars });
 }
 
 export async function GET(
@@ -182,15 +227,16 @@ export async function GET(
     children.push(new Paragraph({ children: [new TextRun({ text: "Não informado.", italics: true })] }));
   } else {
     children.push(
-      table(
-        ["Equipamento", "Qtd.", "Situação", "Fotos"],
-        eqp.map((r) => [
-          r.nome,
-          String(r.quantidade),
-          r.situacao ?? "—",
-          (Array.isArray(r.fotos) ? r.fotos : []).map((f) => f.split("/").pop()).join(", ") || "—",
-        ])
-      )
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders,
+        rows: [
+          new TableRow({ tableHeader: true, children: [cell("Equipamento", true), cell("Qtd.", true), cell("Situação", true), cell("Fotos", true)] }),
+          ...await Promise.all(eqp.map(async (r) =>
+            new TableRow({ children: [cell(r.nome), cell(String(r.quantidade)), cell(r.situacao ?? "—"), await photosCell(Array.isArray(r.fotos) ? r.fotos : [])] })
+          )),
+        ],
+      })
     );
   }
 
@@ -199,23 +245,29 @@ export async function GET(
     children.push(new Paragraph({ children: [new TextRun({ text: "Não informado.", italics: true })] }));
   } else {
     children.push(
-      table(
-        ["Atividade", "Un.", "Total", "Exec.", "%", "Status", "Fotos"],
-        at.map((r) => {
-          const total = r.quantidadeTotal || 0;
-          const exec = r.quantidadeExecutada || 0;
-          const pct = total > 0 ? Math.round((exec / total) * 100) : 0;
-          return [
-            r.descricao,
-            r.unidade,
-            String(total),
-            String(exec),
-            `${pct}%`,
-            STATUS_ATIVIDADE[String(r.status ?? "")]?.label ?? r.status ?? "—",
-            (Array.isArray(r.fotos) ? r.fotos : []).map((f) => f.split("/").pop()).join(", ") || "—",
-          ];
-        })
-      )
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders,
+        rows: [
+          new TableRow({ tableHeader: true, children: [cell("Atividade", true), cell("Un.", true), cell("Total", true), cell("Exec.", true), cell("%", true), cell("Status", true), cell("Fotos", true)] }),
+          ...await Promise.all(at.map(async (r) => {
+            const t = r.quantidadeTotal || 0;
+            const e = r.quantidadeExecutada || 0;
+            const pct = t > 0 ? Math.round((e / t) * 100) : 0;
+            return new TableRow({
+              children: [
+                cell(r.descricao),
+                cell(r.unidade),
+                cell(String(t)),
+                cell(String(e)),
+                cell(`${pct}%`),
+                cell(STATUS_ATIVIDADE[String(r.status ?? "")]?.label ?? r.status ?? "—"),
+                await photosCell(Array.isArray(r.fotos) ? r.fotos : []),
+              ],
+            });
+          })),
+        ],
+      })
     );
   }
 
@@ -293,7 +345,6 @@ export async function GET(
       "Content-Length": String(buffer.length),
       "Cache-Control": "no-store, max-age=0",
       "X-Content-Type-Options": "nosniff",
-      "Access-Control-Expose-Headers": "Content-Disposition",
     },
   });
 }
