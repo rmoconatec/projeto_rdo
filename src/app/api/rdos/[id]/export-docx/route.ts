@@ -94,7 +94,7 @@ async function photosCell(urls: string[]): Promise<TableCell> {
   const pars: Paragraph[] = [];
   for (const url of urls) {
     try {
-      const filePath = path.join(process.cwd(), "public", url);
+      const filePath = path.join(process.cwd(), "public", url.replace(/^\//, ""));
       const buffer = await fs.readFile(filePath);
       const { width, height } = sizeOf(buffer);
       const maxW = 120;
