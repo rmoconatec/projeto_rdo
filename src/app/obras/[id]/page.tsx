@@ -3,25 +3,11 @@
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { localDb, genId, type DexieObra, type DexieRdo } from "@/db/dexie";
 import { STATUS_OBRA, STATUS_RDO, formatDate } from "@/lib/labels";
 
-type Rdo = {
-  id: number;
-  numero: number;
-  data: string;
-  status: string;
-};
-type Obra = {
-  id: number;
-  nome: string;
-  cliente: string | null;
-  endereco: string | null;
-  responsavel: string | null;
-  descricao: string | null;
-  status: string;
-  dataInicio: string | null;
-  previsaoTermino: string | null;
-  rdos: Rdo[];
+type ObraDetail = DexieObra & {
+  rdos: DexieRdo[];
 };
 
 export default function ObraDetail({
@@ -31,7 +17,7 @@ export default function ObraDetail({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const [obra, setObra] = useState<Obra | null>(null);
+  const [obra, setObra] = useState<ObraDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [novoData, setNovoData] = useState(
@@ -40,35 +26,63 @@ export default function ObraDetail({
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/obras/${id}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled && data) setObra(data);
-        if (!cancelled) setLoading(false);
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false);
+
+    localDb.obras.get(id).then((o) => {
+      if (cancelled || !o) { if (!cancelled) setLoading(false); return; }
+      localDb.rdos.where("obraId").equals(id).toArray().then((todosRdos) => {
+        if (cancelled) return;
+        const sorted = todosRdos.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        setObra({ ...o, rdos: sorted });
+        setLoading(false);
       });
+    });
+
     return () => { cancelled = true; };
   }, [id]);
 
   async function criarRdo() {
     setCreating(true);
-    const res = await fetch(`/api/obras/${id}/rdos`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: novoData }),
-    });
+
+    const rdosDaObra = await localDb.rdos.where("obraId").equals(id).toArray();
+    const maxNum = rdosDaObra.reduce((max, r) => Math.max(max, r.numero), 0);
+
+    const novo: DexieRdo = {
+      id: genId(),
+      obraId: id,
+      numero: maxNum + 1,
+      data: novoData,
+      status: "rascunho",
+      climaManha: "bom",
+      climaTarde: "bom",
+      climaNoite: "bom",
+      condicaoManha: "praticavel",
+      condicaoTarde: "praticavel",
+      condicaoNoite: "praticavel",
+      observacoes: null,
+      createdAt: new Date().toISOString(),
+      serverId: null,
+      syncStatus: "pending",
+    };
+
+    await localDb.rdos.add(novo);
     setCreating(false);
-    if (res.ok) {
-      const rdo = await res.json();
-      router.push(`/obras/${id}/rdo/${rdo.id}`);
-    }
+    router.push(`/obras/${id}/rdo/${novo.id}`);
   }
 
   async function excluirObra() {
     if (!confirm("Excluir esta obra e todos os seus RDOs?")) return;
-    await fetch(`/api/obras/${id}`, { method: "DELETE" });
+    const rdosDaObra = await localDb.rdos.where("obraId").equals(id).toArray();
+    for (const r of rdosDaObra) {
+      await localDb.maoDeObra.where("rdoId").equals(r.id).delete();
+      await localDb.equipamentos.where("rdoId").equals(r.id).delete();
+      await localDb.atividades.where("rdoId").equals(r.id).delete();
+      await localDb.ocorrencias.where("rdoId").equals(r.id).delete();
+      await localDb.comentarios.where("rdoId").equals(r.id).delete();
+      await localDb.anexos.where("rdoId").equals(r.id).delete();
+      await localDb.materiais.where("rdoId").equals(r.id).delete();
+    }
+    await localDb.rdos.where("obraId").equals(id).delete();
+    await localDb.obras.delete(id);
     router.push("/obras");
   }
 

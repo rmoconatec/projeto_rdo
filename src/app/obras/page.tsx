@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { localDb, genId, type DexieObra } from "@/db/dexie";
 import { STATUS_OBRA, formatDate } from "@/lib/labels";
 
-type Obra = {
-  id: number;
+type ObraView = {
+  id: string;
   nome: string;
   cliente: string | null;
   endereco: string | null;
@@ -28,28 +29,32 @@ const empty = {
 };
 
 export default function ObrasPage() {
-  const [obras, setObras] = useState<Obra[]>([]);
+  const [obras, setObras] = useState<ObraView[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
 
-  async function load() {
-    setObras(await fetch("/api/obras").then((r) => r.json()));
-    setLoading(false);
-  }
-
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/obras")
-      .then((res) => res.json())
-      .then((data) => {
-        if (!cancelled) setObras(data);
-        if (!cancelled) setLoading(false);
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false);
-      });
+
+    Promise.all([localDb.obras.toArray(), localDb.rdos.toArray()]).then(([todas, todosRdos]) => {
+      if (cancelled) return;
+      const views: ObraView[] = todas.map((o) => ({
+        id: o.id,
+        nome: o.nome,
+        cliente: o.cliente,
+        endereco: o.endereco,
+        responsavel: o.responsavel,
+        status: o.status,
+        dataInicio: o.dataInicio,
+        previsaoTermino: o.previsaoTermino,
+        totalRdos: todosRdos.filter((r) => r.obraId === o.id).length,
+      }));
+      setObras(views);
+      setLoading(false);
+    });
+
     return () => { cancelled = true; };
   }, []);
 
@@ -57,15 +62,41 @@ export default function ObrasPage() {
     e.preventDefault();
     if (!form.nome.trim()) return;
     setSaving(true);
-    await fetch("/api/obras", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
+
+    const now = new Date().toISOString();
+    const nova: DexieObra = {
+      id: genId(),
+      nome: form.nome.trim(),
+      cliente: form.cliente || null,
+      endereco: form.endereco || null,
+      responsavel: form.responsavel || null,
+      descricao: form.descricao || null,
+      status: form.status || "em_andamento",
+      dataInicio: form.dataInicio || null,
+      previsaoTermino: form.previsaoTermino || null,
+      createdAt: now,
+      serverId: null,
+      syncStatus: "pending",
+    };
+
+    await localDb.obras.add(nova);
     setSaving(false);
     setForm(empty);
     setShowForm(false);
-    load();
+    const todas = await localDb.obras.toArray();
+    const todosRdos = await localDb.rdos.toArray();
+    const views: ObraView[] = todas.map((o) => ({
+      id: o.id,
+      nome: o.nome,
+      cliente: o.cliente,
+      endereco: o.endereco,
+      responsavel: o.responsavel,
+      status: o.status,
+      dataInicio: o.dataInicio,
+      previsaoTermino: o.previsaoTermino,
+      totalRdos: todosRdos.filter((r) => r.obraId === o.id).length,
+    }));
+    setObras(views);
   }
 
   return (
@@ -173,7 +204,7 @@ export default function ObrasPage() {
         <p className="text-slate-500">Carregando...</p>
       ) : obras.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
-          Nenhuma obra cadastrada. Clique em “Nova obra” para começar.
+          Nenhuma obra cadastrada. Clique em &ldquo;Nova obra&rdquo; para começar.
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

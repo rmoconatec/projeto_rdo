@@ -34,13 +34,25 @@ Run `lint` then `typecheck` before committing — `next build` also typechecks b
 
 ## Arquitetura
 
-- `src/app/` — App Router com páginas (server components) + API routes (route.ts).
-- `src/app/api/` — endpoints REST. PUT em `/api/rdos/[id]` faz delete+re-insert dos filhos (substituição completa).
-- `@/*` aponta para `./src/*` (tsconfig paths).
+### Offline-first (IndexedDB + Sync)
+
+- **`src/db/dexie.ts`** — Banco local IndexedDB via Dexie.js. 9 tabelas com `syncStatus` (pending|synced) e `serverId` para mapeamento local↔servidor.
+- **`src/lib/sync.ts`** — Serviço de sincronização. `runSync()` envia dados pendentes para o Supabase via API REST. `pullFromServer()` baixa dados existentes.
+- **Todas as páginas** são client components (`"use client"`) que lêem/gravam no IndexedDB.
+- **Botão "Sincronizar"** no editor de RDO envia dados locais pendentes para o Supabase.
+- **Export Word** e **relatório** só funcionam após sincronização (quando `serverId` está disponível).
+
+### API (para sincronização)
+
+- `src/app/api/` — endpoints REST usados exclusivamente pelo sync. PUT em `/api/rdos/[id]` faz delete+re-insert dos filhos (substituição completa).
 - Upload de imagens: `/api/upload` (JPEG/PNG/WEBP, max 8MB). Upload de documentos: `/api/upload-doc` (qualquer tipo, max 25MB).
 - Export Word: rota `/api/rdos/[id]/export-docx`, usa `showSaveFilePicker` com fallback para download direto.
+
+### Notas
+
 - Labels/constantes em `src/lib/labels.ts` (STATUS_OBRA, STATUS_RDO, CLIMA, CONDICAO, etc).
-- `"use client"` necessário em componentes interativos (formulários, botões de export).
+- `@/*` aponta para `./src/*` (tsconfig paths).
+- `src/db/index.ts` — conexão PostgreSQL (usada apenas pelas API routes). O throw de `DATABASE_URL` ausente é lazy para não quebrar o build.
 
 ## Convenções
 
@@ -54,16 +66,23 @@ Run `lint` then `typecheck` before committing — `next build` also typechecks b
 
 ## Docker
 
-- `docker-compose.yml` sobe PostgreSQL + app com hot-reload.
+- `docker-compose.yml` sobe apenas a app (conecta ao Supabase via `host.docker.internal`).
 - `Dockerfile` produz build standalone para produção.
 - `next.config.ts` ativa `output: "standalone"` quando `NODE_ENV=production`.
+- `extra_hosts: ["host.docker.internal:host-gateway"]` necessário no WSL para a app alcançar o Supabase no host.
 
 ```sh
 docker compose up -d          # dev com hot-reload
-docker compose run app npx drizzle-kit push --force  # criar tabelas
+docker compose exec app npx drizzle-kit push --force  # criar tabelas (automatico no startup)
 ```
 
 - Para produção: descomentar `command: ["node", "server.js"]` e comentar o command de dev no `docker-compose.yml`.
+
+### Supabase self-hosted (WSL)
+
+- O Supabase PostgreSQL roda no host WSL na porta `54322`.
+- A `DATABASE_URL` usa `host.docker.internal:54322` para o container alcançar o host.
+- Crie um database separado por projeto (ex.: `rdo_db`) para não conflitar com outras apps.
 
 ## Ausente
 

@@ -11,10 +11,13 @@ import {
   TIPO_OCORRENCIA,
   formatDate,
 } from "@/lib/labels";
+import { localDb, genId } from "@/db/dexie";
+import { runSync, onSync, type SyncEvent } from "@/lib/sync";
 
-type MO = { funcao: string; quantidade: number };
-type EQ = { nome: string; quantidade: number; situacao: string; fotos?: string[] };
+type MO = { id?: string; funcao: string; quantidade: number };
+type EQ = { id?: string; nome: string; quantidade: number; situacao: string; fotos?: string[] };
 type AT = {
+  id?: string;
   descricao: string;
   unidade: string;
   quantidadeTotal: number;
@@ -23,37 +26,16 @@ type AT = {
   status: string;
   fotos?: string[];
 };
-type OC = { tipo: string; descricao: string };
-type CO = { id: number; autor: string; texto: string; createdAt: string };
-type AN = { id?: number; nome: string; url: string; tipo?: string | null; tamanho?: number | null };
+type OC = { id?: string; tipo: string; descricao: string };
+type CO = { id: string; autor: string; texto: string; createdAt: string };
+type AN = { id?: string; nome: string; url: string; tipo?: string | null; tamanho?: number | null };
 type MT = {
+  id?: string;
   nome: string;
   unidade: string;
   qtdEntrada: number;
   qtdUtilizada: number;
-  observacao: string;
-};
-
-type RdoData = {
-  id: number;
-  numero: number;
-  data: string;
-  status: string;
-  climaManha: string;
-  climaTarde: string;
-  climaNoite: string;
-  condicaoManha: string;
-  condicaoTarde: string;
-  condicaoNoite: string;
-  observacoes: string | null;
-  obra: { id: number; nome: string };
-  maoDeObra: MO[];
-  equipamentos: EQ[];
-  atividades: AT[];
-  ocorrencias: OC[];
-  comentarios: CO[];
-  anexos: AN[];
-  materiais: MT[];
+  observacao: string | null;
 };
 
 export default function RdoEditor({
@@ -63,12 +45,13 @@ export default function RdoEditor({
 }) {
   const { id, rdoId } = use(params);
   const router = useRouter();
-  const [rdo, setRdo] = useState<RdoData | null>(null);
+  const [rdo, setRdo] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
 
-  // seções editáveis
   const [data, setData] = useState("");
   const [status, setStatus] = useState("rascunho");
   const [clima, setClima] = useState({
@@ -88,62 +71,148 @@ export default function RdoEditor({
   const [anexos, setAnexos] = useState<AN[]>([]);
   const [materiais, setMateriais] = useState<MT[]>([]);
   const [novoComentario, setNovoComentario] = useState({ autor: "", texto: "" });
+  const [obraNome, setObraNome] = useState("");
+
+  useEffect(() => {
+    return onSync((event: SyncEvent, msg?: string) => {
+      setSyncing(event === "start" || event === "progress");
+      if (msg) setSyncMsg(msg);
+      if (event === "done" || event === "error") {
+        setTimeout(() => setSyncMsg(""), 4000);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve().then(async () => {
-      if (cancelled) return;
+    async function load() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/rdos/${rdoId}`);
-        if (cancelled) return;
-        if (res.ok) {
-          const d: RdoData = await res.json();
-          setRdo(d);
-          setData(d.data?.slice(0, 10) ?? "");
-          setStatus(d.status);
-          setClima({
-            climaManha: d.climaManha ?? "bom",
-            climaTarde: d.climaTarde ?? "bom",
-            climaNoite: d.climaNoite ?? "bom",
-            condicaoManha: d.condicaoManha ?? "praticavel",
-            condicaoTarde: d.condicaoTarde ?? "praticavel",
-            condicaoNoite: d.condicaoNoite ?? "praticavel",
-          });
-          setObservacoes(d.observacoes ?? "");
-          setMo(d.maoDeObra ?? []);
-          setEqp(d.equipamentos ?? []);
-          setAt(d.atividades ?? []);
-          setOc(d.ocorrencias ?? []);
-          setComentarios(d.comentarios ?? []);
-          setAnexos(d.anexos ?? []);
-          setMateriais(d.materiais ?? []);
+        const r = await localDb.rdos.get(rdoId);
+        if (cancelled || !r) {
+          if (!cancelled) setLoading(false);
+          return;
         }
+
+        const obra = await localDb.obras.get(r.obraId);
+        if (!cancelled) setObraNome(obra?.nome ?? "");
+
+        const [moArr, eqpArr, atArr, ocArr, coArr, anArr, mtArr] = await Promise.all([
+          localDb.maoDeObra.where("rdoId").equals(rdoId).toArray(),
+          localDb.equipamentos.where("rdoId").equals(rdoId).toArray(),
+          localDb.atividades.where("rdoId").equals(rdoId).toArray(),
+          localDb.ocorrencias.where("rdoId").equals(rdoId).toArray(),
+          localDb.comentarios.where("rdoId").equals(rdoId).toArray(),
+          localDb.anexos.where("rdoId").equals(rdoId).toArray(),
+          localDb.materiais.where("rdoId").equals(rdoId).toArray(),
+        ]);
+
+        if (cancelled) return;
+        setRdo(r);
+        setData(r.data?.slice(0, 10) ?? "");
+        setStatus(r.status);
+        setClima({
+          climaManha: r.climaManha ?? "bom",
+          climaTarde: r.climaTarde ?? "bom",
+          climaNoite: r.climaNoite ?? "bom",
+          condicaoManha: r.condicaoManha ?? "praticavel",
+          condicaoTarde: r.condicaoTarde ?? "praticavel",
+          condicaoNoite: r.condicaoNoite ?? "praticavel",
+        });
+        setObservacoes(r.observacoes ?? "");
+        setMo(moArr.map(({ id: _id, rdoId: _r, serverId: _s, syncStatus: _ss, ...rest }) => ({ ...rest })));
+        setEqp(eqpArr.map(({ id: _id, rdoId: _r, serverId: _s, syncStatus: _ss, ...rest }) => ({ ...rest })));
+        setAt(atArr.map(({ id: _id, rdoId: _r, serverId: _s, syncStatus: _ss, ...rest }) => ({ ...rest })));
+        setOc(ocArr.map(({ id: _id, rdoId: _r, serverId: _s, syncStatus: _ss, ...rest }) => ({ ...rest })));
+        setComentarios(coArr.map(({ id: _id, rdoId: _r, serverId: _s, syncStatus: _ss, ...rest }) => ({ id: _id ?? crypto.randomUUID(), ...rest })));
+        setAnexos(anArr.map(({ id: _id, rdoId: _r, serverId: _s, syncStatus: _ss, ...rest }) => ({ ...rest })));
+        setMateriais(mtArr.map(({ id: _id, rdoId: _r, serverId: _s, syncStatus: _ss, ...rest }) => ({ ...rest })));
       } catch {}
       if (!cancelled) setLoading(false);
-    });
+    }
+    load();
     return () => { cancelled = true; };
   }, [rdoId]);
+
+  async function saveChildren(rdoLocalId: string) {
+    await localDb.maoDeObra.where("rdoId").equals(rdoLocalId).delete();
+    await localDb.equipamentos.where("rdoId").equals(rdoLocalId).delete();
+    await localDb.atividades.where("rdoId").equals(rdoLocalId).delete();
+    await localDb.ocorrencias.where("rdoId").equals(rdoLocalId).delete();
+    await localDb.anexos.where("rdoId").equals(rdoLocalId).delete();
+    await localDb.materiais.where("rdoId").equals(rdoLocalId).delete();
+
+    const now = "pending" as const;
+    if (mo.length) {
+      await localDb.maoDeObra.bulkAdd(
+        mo.map((r) => ({ id: genId(), rdoId: rdoLocalId, funcao: r.funcao, quantidade: r.quantidade || 1, serverId: null, syncStatus: now }))
+      );
+    }
+    if (eqp.length) {
+      await localDb.equipamentos.bulkAdd(
+        eqp.map((r) => ({ id: genId(), rdoId: rdoLocalId, nome: r.nome, quantidade: r.quantidade || 1, situacao: r.situacao || "operando", fotos: r.fotos || [], serverId: null, syncStatus: now }))
+      );
+    }
+    if (at.length) {
+      await localDb.atividades.bulkAdd(
+        at.map((r) => {
+          const total = Math.max(0, r.quantidadeTotal || 0);
+          const exec = Math.max(0, r.quantidadeExecutada || 0);
+          const pct = total > 0 ? Math.round((exec / total) * 100) : 0;
+          return {
+            id: genId(), rdoId: rdoLocalId,
+            descricao: r.descricao, unidade: r.unidade || "un",
+            quantidadeTotal: total, quantidadeExecutada: exec,
+            progresso: pct, status: r.status || "em_andamento",
+            fotos: r.fotos || [],
+            serverId: null, syncStatus: now,
+          };
+        })
+      );
+    }
+    if (oc.length) {
+      await localDb.ocorrencias.bulkAdd(
+        oc.map((r) => ({ id: genId(), rdoId: rdoLocalId, tipo: r.tipo || "geral", descricao: r.descricao, serverId: null, syncStatus: now }))
+      );
+    }
+    if (anexos.length) {
+      await localDb.anexos.bulkAdd(
+        anexos.map((r) => ({ id: genId(), rdoId: rdoLocalId, nome: r.nome, url: r.url, tipo: r.tipo || null, tamanho: r.tamanho || null, serverId: null, syncStatus: now }))
+      );
+    }
+    if (materiais.length) {
+      await localDb.materiais.bulkAdd(
+        materiais.map((r) => ({
+          id: genId(), rdoId: rdoLocalId,
+          nome: r.nome, unidade: r.unidade || "un",
+          qtdEntrada: Math.max(0, r.qtdEntrada || 0),
+          qtdUtilizada: Math.max(0, r.qtdUtilizada || 0),
+          observacao: r.observacao || null,
+          serverId: null, syncStatus: now,
+        }))
+      );
+    }
+  }
 
   async function salvar(novoStatus?: string) {
     setSaving(true);
     const st = novoStatus ?? status;
-    await fetch(`/api/rdos/${rdoId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        data,
-        status: st,
-        ...clima,
-        observacoes,
-        maoDeObra: mo,
-        equipamentos: eqp,
-        atividades: at,
-        ocorrencias: oc,
-        anexos: anexos.map(({ id, ...a }) => a),
-        materiais: materiais,
-      }),
+
+    await localDb.rdos.put({
+      id: rdoId,
+      obraId: id,
+      numero: rdo?.numero ?? 1,
+      data,
+      status: st,
+      ...clima,
+      observacoes: observacoes || null,
+      createdAt: rdo?.createdAt ?? new Date().toISOString(),
+      serverId: rdo?.serverId ?? null,
+      syncStatus: "pending",
     });
+
+    await saveChildren(rdoId);
+
     setStatus(st);
     setSaving(false);
     setSavedMsg("Salvo!");
@@ -152,22 +221,41 @@ export default function RdoEditor({
 
   async function excluir() {
     if (!confirm("Excluir este RDO?")) return;
-    await fetch(`/api/rdos/${rdoId}`, { method: "DELETE" });
+    await localDb.maoDeObra.where("rdoId").equals(rdoId).delete();
+    await localDb.equipamentos.where("rdoId").equals(rdoId).delete();
+    await localDb.atividades.where("rdoId").equals(rdoId).delete();
+    await localDb.ocorrencias.where("rdoId").equals(rdoId).delete();
+    await localDb.comentarios.where("rdoId").equals(rdoId).delete();
+    await localDb.anexos.where("rdoId").equals(rdoId).delete();
+    await localDb.materiais.where("rdoId").equals(rdoId).delete();
+    await localDb.rdos.delete(rdoId);
     router.push(`/obras/${id}`);
   }
 
   async function enviarComentario() {
     if (!novoComentario.texto.trim()) return;
-    const res = await fetch(`/api/rdos/${rdoId}/comentarios`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(novoComentario),
+    const c: CO = {
+      id: genId(),
+      autor: novoComentario.autor.trim() || "Anônimo",
+      texto: novoComentario.texto.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    await localDb.comentarios.add({
+      id: c.id,
+      rdoId,
+      autor: c.autor,
+      texto: c.texto,
+      createdAt: c.createdAt,
+      serverId: null,
+      syncStatus: "pending",
     });
-    if (res.ok) {
-      const c = await res.json();
-      setComentarios((prev) => [...prev, c]);
-      setNovoComentario({ autor: novoComentario.autor, texto: "" });
-    }
+    setComentarios((prev) => [...prev, c]);
+    setNovoComentario({ autor: novoComentario.autor, texto: "" });
+  }
+
+  async function handleSync() {
+    await salvar();
+    await runSync();
   }
 
   if (loading) return <p className="text-slate-500">Carregando...</p>;
@@ -182,9 +270,14 @@ export default function RdoEditor({
           href={`/obras/${id}`}
           className="text-sm text-orange-600 hover:underline"
         >
-          ← {rdo.obra?.nome}
+          ← {obraNome}
         </Link>
         <div className="flex items-center gap-2">
+          {syncMsg && (
+            <span className="text-sm font-medium text-indigo-600">
+              {syncMsg}
+            </span>
+          )}
           {savedMsg && (
             <span className="text-sm font-medium text-emerald-600">
               {savedMsg}
@@ -210,6 +303,13 @@ export default function RdoEditor({
           >
             Finalizar RDO
           </button>
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="rounded-lg bg-indigo-500 px-4 py-1.5 text-sm font-semibold text-white hover:bg-indigo-600 disabled:opacity-50"
+          >
+            {syncing ? "Sincronizando..." : "Sincronizar"}
+          </button>
           <Link
             href={`/obras/${id}/rdo/${rdoId}/relatorio`}
             target="_blank"
@@ -217,7 +317,13 @@ export default function RdoEditor({
           >
             🖨️ Gerar relatório
           </Link>
-          <ExportWordButton rdoId={Number(rdoId)} />
+          {rdo?.serverId ? (
+            <ExportWordButton rdoId={rdo.serverId} />
+          ) : (
+            <span className="inline-block rounded-lg border border-slate-300 px-4 py-1.5 text-xs text-slate-400">
+              📄 Export Word (sincronize primeiro)
+            </span>
+          )}
         </div>
       </div>
 
@@ -257,7 +363,6 @@ export default function RdoEditor({
         </div>
       </div>
 
-      {/* Clima */}
       <Card title="Condições climáticas" icon="🌤️">
         <div className="grid gap-4 sm:grid-cols-3">
           {(["Manha", "Tarde", "Noite"] as const).map((p) => {
@@ -300,7 +405,6 @@ export default function RdoEditor({
         </div>
       </Card>
 
-      {/* Mão de obra */}
       <Card
         title="Mão de obra (efetivo)"
         icon="👷"
@@ -355,7 +459,6 @@ export default function RdoEditor({
         )}
       </Card>
 
-      {/* Equipamentos */}
       <Card
         title="Equipamentos"
         icon="🚜"
@@ -444,7 +547,6 @@ export default function RdoEditor({
         </div>
       </Card>
 
-      {/* Atividades */}
       <Card
         title="Atividades executadas"
         icon="🧱"
@@ -473,17 +575,9 @@ export default function RdoEditor({
         {at.length === 0 && <Empty text="Nenhuma atividade registrada." />}
         <div className="space-y-3">
           {at.map((r, i) => {
-            // cálculo automático do progresso
             const total = Math.max(0, r.quantidadeTotal || 0);
             const exec = Math.max(0, r.quantidadeExecutada || 0);
             const pct = total > 0 ? Math.min(100, Math.round((exec / total) * 100)) : 0;
-            // status automático
-            const autoStatus =
-              pct >= 100
-                ? "concluida"
-                : exec > 0
-                  ? "em_andamento"
-                  : "paralisada";
 
             function updateAt(partial: Partial<AT>) {
               setAt(at.map((x, j) => (j === i ? { ...x, ...partial } : x)));
@@ -494,7 +588,6 @@ export default function RdoEditor({
                 key={i}
                 className="rounded-lg border border-slate-200 p-3 space-y-2"
               >
-                {/* Descrição + remover */}
                 <div className="flex gap-2">
                   <input
                     placeholder="Descrição da atividade"
@@ -505,7 +598,6 @@ export default function RdoEditor({
                   <RemoveBtn onClick={() => setAt(at.filter((_, j) => j !== i))} />
                 </div>
 
-                {/* Unidade + Qtde Total + Qtde Executada */}
                 <div className="flex flex-wrap items-end gap-2">
                   <label className="block min-w-20">
                     <span className="mb-0.5 block text-xs font-medium text-slate-500">
@@ -573,7 +665,6 @@ export default function RdoEditor({
                   </label>
                 </div>
 
-                {/* Barra de progresso + percentual + status automático */}
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
                     <div className="h-3 w-full overflow-hidden rounded-full bg-slate-200">
@@ -594,14 +685,13 @@ export default function RdoEditor({
                   </span>
                   <span
                     className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                      STATUS_ATIVIDADE[autoStatus]?.cls ?? "bg-slate-100"
+                      STATUS_ATIVIDADE[r.status]?.cls ?? "bg-slate-100"
                     }`}
                   >
-                    {STATUS_ATIVIDADE[autoStatus]?.label ?? autoStatus}
+                    {STATUS_ATIVIDADE[r.status]?.label ?? r.status}
                   </span>
                 </div>
 
-                {/* Fotos */}
                 <PhotosInput
                   values={r.fotos ?? []}
                   onChange={(fotos) => updateAt({ fotos })}
@@ -612,7 +702,6 @@ export default function RdoEditor({
         </div>
       </Card>
 
-      {/* Ocorrências */}
       <Card
         title="Ocorrências"
         icon="⚠️"
@@ -660,7 +749,6 @@ export default function RdoEditor({
         </div>
       </Card>
 
-      {/* Controle de materiais */}
       <Card
         title="Controle de materiais"
         icon="📦"
@@ -823,12 +911,10 @@ export default function RdoEditor({
         </div>
       </Card>
 
-      {/* Anexos / documentos */}
       <Card title="Anexos e documentos" icon="📎">
         <AnexosInput values={anexos} onChange={setAnexos} />
       </Card>
 
-      {/* Observações gerais */}
       <Card title="Observações gerais" icon="📝">
         <textarea
           value={observacoes}
@@ -838,7 +924,6 @@ export default function RdoEditor({
         />
       </Card>
 
-      {/* Comentários */}
       <Card title="Comentários" icon="💬">
         <div className="space-y-3">
           {comentarios.length === 0 && (
@@ -928,6 +1013,71 @@ function Empty({ text }: { text: string }) {
   return <p className="py-2 text-sm text-slate-400">{text}</p>;
 }
 
+function RemoveBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="rounded-lg border border-red-200 px-2 py-1 text-sm text-red-500 hover:bg-red-50"
+      title="Remover"
+    >
+      ✕
+    </button>
+  );
+}
+
+function PhotosInput({
+  values,
+  onChange,
+}: {
+  values: string[];
+  onChange: (fotos: string[]) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    setUploading(true);
+    const added: string[] = [];
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (res.ok) {
+          const j = await res.json();
+          added.push(j.url);
+        }
+      } catch {}
+    }
+    setUploading(false);
+    if (added.length) onChange([...values, ...added]);
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {values.map((url, i) => (
+        <span key={i} className="relative inline-block">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={url} alt="" className="h-10 w-10 rounded object-cover" />
+          <button
+            type="button"
+            onClick={() => onChange(values.filter((_, j) => j !== i))}
+            className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white"
+          >
+            ✕
+          </button>
+        </span>
+      ))}
+      <label className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-dashed border-slate-300 text-lg text-slate-400 hover:border-orange-400 hover:text-orange-500">
+        <span>{uploading ? "⏳" : "+"}</span>
+        <input type="file" accept="image/*" onChange={handleFiles} className="hidden" />
+      </label>
+    </div>
+  );
+}
+
 function AnexosInput({
   values,
   onChange,
@@ -941,8 +1091,7 @@ function AnexosInput({
   const fileIcons: Record<string, string> = {
     "application/pdf": "📄",
     "application/msword": "📝",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-      "📝",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "📝",
     "application/vnd.ms-excel": "📊",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "📊",
     "image/": "🖼️",
@@ -997,10 +1146,7 @@ function AnexosInput({
       {values.length > 0 && (
         <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
           {values.map((a, idx) => (
-            <li
-              key={idx}
-              className="flex items-center gap-2 px-3 py-2 text-sm"
-            >
+            <li key={idx} className="flex items-center gap-2 px-3 py-2 text-sm">
               <span className="text-lg">{iconFor(a.tipo)}</span>
               <a
                 href={a.url}
@@ -1012,9 +1158,7 @@ function AnexosInput({
                 {a.nome}
               </a>
               {a.tamanho ? (
-                <span className="text-xs text-slate-400">
-                  {formatSize(a.tamanho)}
-                </span>
+                <span className="text-xs text-slate-400">{formatSize(a.tamanho)}</span>
               ) : null}
               <button
                 type="button"
@@ -1029,137 +1173,17 @@ function AnexosInput({
         </ul>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-          📎 <span>Anexar documento</span>
+        <label className="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">
+          {uploading ? "Enviando..." : "+ Anexar arquivo"}
           <input
             type="file"
             multiple
-            className="hidden"
             onChange={handleFiles}
+            className="hidden"
           />
         </label>
-        {uploading && (
-          <span className="text-xs text-slate-500">Enviando...</span>
-        )}
-        {values.length > 0 && (
-          <span className="ml-auto text-xs text-slate-400">
-            {values.length} anexo(s)
-          </span>
-        )}
+        {error && <span className="text-xs text-red-500">{error}</span>}
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
-    </div>
-  );
-}
-
-function RemoveBtn({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="shrink-0 rounded-lg border border-slate-200 px-2 text-slate-400 hover:border-red-300 hover:text-red-500"
-      title="Remover"
-    >
-      ✕
-    </button>
-  );
-}
-
-function PhotosInput({
-  values,
-  onChange,
-}: {
-  values: string[];
-  onChange: (urls: string[]) => void;
-}) {
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = ""; // permite reenviar o mesmo arquivo
-    if (files.length === 0) return;
-    setError("");
-    setUploading(true);
-    const uploaded: string[] = [];
-    for (const file of files) {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error || "Falha ao enviar foto");
-        continue;
-      }
-      const { url } = await res.json();
-      uploaded.push(url);
-    }
-    setUploading(false);
-    if (uploaded.length) onChange([...values, ...uploaded]);
-  }
-
-  return (
-    <div className="space-y-2">
-      {values.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {values.map((url, idx) => (
-            <div key={idx} className="group relative">
-              <a href={url} target="_blank" rel="noopener noreferrer">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={url}
-                  alt={`Foto ${idx + 1}`}
-                  className="h-20 w-20 rounded-md object-cover ring-1 ring-slate-200"
-                />
-              </a>
-              <button
-                type="button"
-                onClick={() => onChange(values.filter((_, j) => j !== idx))}
-                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow ring-2 ring-white hover:bg-red-600"
-                title="Remover foto"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        <label
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-orange-300 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 hover:bg-orange-100"
-          title="Usar a câmera do dispositivo"
-        >
-          📷 <span>Tirar foto</span>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleFiles}
-          />
-        </label>
-        <label
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-          title="Anexar uma ou mais fotos do dispositivo"
-        >
-          📎 <span>Anexar foto</span>
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={handleFiles}
-          />
-        </label>
-        {uploading && (
-          <span className="text-xs text-slate-500">Enviando...</span>
-        )}
-        {values.length > 0 && (
-          <span className="ml-auto text-xs text-slate-400">
-            {values.length} foto(s)
-          </span>
-        )}
-      </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
 }

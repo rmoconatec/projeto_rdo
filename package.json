@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "dexie": "^4.4.4",
     "docx": "^9.7.1",
     "drizzle-orm": "0.45.2",
     "image-size": "^2.0.2",
