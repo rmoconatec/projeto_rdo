@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import "./globals.css";
 
@@ -17,9 +18,14 @@ export default function RootLayout({
         <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center gap-2">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-500 text-lg">
-                🏗️
-              </span>
+              <Image
+                src="/images/conatec-logo.svg"
+                alt="CONATEC"
+                width={780}
+                height={560}
+                className="h-11 w-auto"
+                priority
+              />
               <div className="leading-tight">
                 <p className="text-base font-bold text-slate-900">
                   Diário de Obras
