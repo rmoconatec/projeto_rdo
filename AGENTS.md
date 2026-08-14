@@ -23,8 +23,11 @@ Run `lint` then `typecheck` before committing — `next build` also typechecks b
 
 - `DATABASE_URL` é exigida em runtime (a aplicação quebra se ausente).
 - `drizzle.config.ts` lê `DATABASE_URL` da variável de ambiente — usada pelo drizzle-kit (migrations).
-- Não há `.env.example` — criar `.env.local` com `DATABASE_URL` para desenvolvimento.
+- Não há `.env.example` — `.env.local` (git-ignored via `.env*`) com `DATABASE_URL` e opcionalmente `API_KEY`.
+  - Dev local (`npm run dev`): `DATABASE_URL=postgresql://postgres:postgres@localhost:54322/rdo_db` (Supabase no host WSL).
+  - `API_KEY=rdo-android-dev-key` é a chave default usada pelo app Android (backend aceita tudo se ausente — modo dev).
 - Pool do Postgres é cacheado em `globalThis` para sobreviver a hot-reloads.
+- O cache `.next/dev` pode ficar owned por `root` se o projeto foi montado num container Docker — `npm run dev` falha com erro de lockfile; limpar via container: `docker run --rm -v $(pwd):/app -w /app node:22-alpine rm -rf .next/dev`.
 
 ## Migrations / Schema
 
@@ -65,6 +68,15 @@ Run `lint` then `typecheck` before committing — `next build` also typechecks b
 - `force-dynamic` em server components que consultam o banco.
 - Número do RDO é auto-incremental por obra (calculado no POST).
 
+## Identidade visual
+
+- Logo CONATEC no header (`src/app/layout.tsx` via `next/image`): usa a versão
+  **aparada** `public/images/conatec-logo-trimmed.svg` (732x231; o SVG original
+  `conatec-logo.svg` tem viewBox `380 370 780 560` com muito espaço em branco e
+  renderiza pequeno).
+- Favicon: `src/app/icon.png` (logo sobre navy `#0a1222`, 32px) — convenção do
+  Next para o ícone da aba.
+
 ## Docker
 
 - `docker-compose.yml` sobe apenas a app (conecta ao Supabase via `host.docker.internal`).
@@ -87,5 +99,5 @@ docker compose exec app npx drizzle-kit push --force  # criar tabelas (automatic
 
 ## Ausente
 
-- Sem testes, sem CI/CD, sem `.gitignore`.
+- Sem testes, sem CI/CD.
 - Sem documentação adicional — este arquivo é a única referência.
