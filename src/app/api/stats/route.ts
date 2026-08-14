@@ -1,10 +1,13 @@
 import { db } from "@/db";
 import { obras, rdos } from "@/db/schema";
 import { sql, eq, desc } from "drizzle-orm";
+import { NextRequest } from "next/server";
+import { checkApiKey, unauthorized } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!checkApiKey(req)) return unauthorized();
   const [obraCount] = await db
     .select({ total: sql<number>`count(*)::int` })
     .from(obras);

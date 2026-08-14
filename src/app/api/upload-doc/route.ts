@@ -2,12 +2,14 @@ import { NextRequest } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
+import { checkApiKey, unauthorized } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
 const MAX_SIZE = 25 * 1024 * 1024; // 25MB
 
 export async function POST(req: NextRequest) {
+  if (!checkApiKey(req)) return unauthorized();
   const form = await req.formData();
   const file = form.get("file");
 

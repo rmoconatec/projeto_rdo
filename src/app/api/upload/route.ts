@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
+import { checkApiKey, unauthorized } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,7 @@ const ALLOWED = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
 const MAX_SIZE = 8 * 1024 * 1024; // 8MB
 
 export async function POST(req: NextRequest) {
+  if (!checkApiKey(req)) return unauthorized();
   const form = await req.formData();
   const file = form.get("file");
 

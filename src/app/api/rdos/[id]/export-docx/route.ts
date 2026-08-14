@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
+import { checkApiKey } from "@/lib/api-auth";
 import {
   Document,
   Packer,
@@ -126,6 +127,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!checkApiKey(_req)) return new Response("Não autorizado", { status: 401 });
   const { id } = await params;
   const rdoId = Number(id);
 

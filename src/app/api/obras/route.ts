@@ -2,10 +2,12 @@ import { db } from "@/db";
 import { obras, rdos } from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
+import { checkApiKey, unauthorized } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!checkApiKey(req)) return unauthorized();
   const rows = await db
     .select({
       id: obras.id,
@@ -29,6 +31,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (!checkApiKey(req)) return unauthorized();
   const body = await req.json();
   if (!body?.nome) {
     return Response.json({ error: "Nome é obrigatório" }, { status: 400 });

@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
+import { checkApiKey, unauthorized } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!checkApiKey(_req)) return unauthorized();
   const { id } = await params;
   const rdoId = Number(id);
   const [rdo] = await db.select().from(rdos).where(eq(rdos.id, rdoId));
@@ -57,6 +59,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!checkApiKey(req)) return unauthorized();
   const { id } = await params;
   const rdoId = Number(id);
   const body = await req.json();
@@ -205,6 +208,7 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!checkApiKey(_req)) return unauthorized();
   const { id } = await params;
   await db.delete(rdos).where(eq(rdos.id, Number(id)));
   return Response.json({ ok: true });

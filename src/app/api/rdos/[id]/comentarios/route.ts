@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { comentarios } from "@/db/schema";
 import { NextRequest } from "next/server";
+import { checkApiKey, unauthorized } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!checkApiKey(req)) return unauthorized();
   const { id } = await params;
   const body = await req.json();
   if (!body?.texto?.trim()) {

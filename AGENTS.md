@@ -47,6 +47,7 @@ Run `lint` then `typecheck` before committing — `next build` also typechecks b
 - `src/app/api/` — endpoints REST usados exclusivamente pelo sync. PUT em `/api/rdos/[id]` faz delete+re-insert dos filhos (substituição completa).
 - Upload de imagens: `/api/upload` (JPEG/PNG/WEBP, max 8MB). Upload de documentos: `/api/upload-doc` (qualquer tipo, max 25MB).
 - Export Word: rota `/api/rdos/[id]/export-docx`, usa `showSaveFilePicker` com fallback para download direto.
+- **Autenticação**: todas as rotas (exceto `/api/health`) validam o header `X-API-Key` via `src/lib/api-auth.ts`. A chave esperada é a env `API_KEY`; se ausente, a API aceita tudo (modo dev). Usada pelo app Android.
 
 ### Notas
 
