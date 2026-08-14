@@ -19,11 +19,11 @@ export default function RootLayout({
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center gap-2">
               <Image
-                src="/images/conatec-logo.svg"
+                src="/images/conatec-logo-trimmed.svg"
                 alt="CONATEC"
-                width={780}
-                height={560}
-                className="h-11 w-auto"
+                width={732}
+                height={231}
+                className="h-14 w-auto"
                 priority
               />
               <div className="leading-tight">
